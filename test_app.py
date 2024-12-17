@@ -1,15 +1,107 @@
 import streamlit as st
 import asyncio
 import os
+import httpx  # 新增：用于异步HTTP请求
 from autogen_agentchat.agents import AssistantAgent
 from autogen_agentchat.conditions import TextMentionTermination
 from autogen_agentchat.teams import RoundRobinGroupChat
 from autogen_ext.models.openai import OpenAIChatCompletionClient
 import pandas as pd
 
-# 定义天气工具函数
+# 定义获取天气的真实工具函数
 async def get_weather(city: str) -> str:
-    return f"{city}的天气是23度，晴天。"
+    async with httpx.AsyncClient() as client:
+        # 根据您的订阅类型，选择正确的API Host
+        # 如果是免费订阅，请使用 'devapi.qweather.com'
+        api_host = "https://devapi.qweather.com"  # 或者 "https://api.qweather.com" 根据您的订阅类型
+
+        # 步骤1：通过Geo API获取location ID
+        geo_url = f"https://geoapi.qweather.com/v2/city/lookup"
+        params_geo = {
+            "location": city,
+            "key": os.environ.get('WEATHER_API_KEY')  # 使用.get以避免KeyError
+        }
+        try:
+            geo_response = await client.get(geo_url, params=params_geo, timeout=10.0)
+            geo_response.raise_for_status()
+            geo_data = geo_response.json()
+        except httpx.RequestError as exc:
+            return f"请求错误：{exc}"
+        except httpx.HTTPStatusError as exc:
+            return f"HTTP错误：{exc.response.status_code} - {exc.response.text}"
+
+        if geo_data.get('code') != "200":
+            return f"错误：{geo_data.get('msg', '无法获取地理信息')}"
+
+        locations = geo_data.get('location')
+        if not locations:
+            return f"未找到城市 '{city}' 的位置信息。"
+
+        # 假设取第一个匹配的结果
+        location_id = locations[0].get('id')
+        if not location_id:
+            return f"无法获取城市 '{city}' 的位置ID。"
+
+        # 步骤2：通过天气API获取实时天气
+        weather_url = f"{api_host}/v7/weather/now"
+        headers = {
+            "X-QW-Api-Key": os.environ.get('WEATHER_API_KEY')  # 使用.get以避免KeyError
+        }
+        params_weather = {
+            "location": location_id,
+            "unit": "m"  # 使用公制单位
+        }
+        try:
+            weather_response = await client.get(weather_url, headers=headers, params=params_weather, timeout=10.0)
+            weather_response.raise_for_status()
+            weather_data = weather_response.json()
+        except httpx.RequestError as exc:
+            return f"请求错误：{exc}"
+        except httpx.HTTPStatusError as exc:
+            return f"HTTP错误：{exc.response.status_code} - {exc.response.text}"
+
+        if weather_data.get('code') != "200":
+            return f"错误：{weather_data.get('msg', '无法获取天气信息')}"
+
+        now = weather_data.get('now', {})
+        if not now:
+            return f"未找到城市 '{city}' 的实时天气信息。"
+
+        # 提取所需的天气信息
+        temp = now.get('temp', '未知')
+        feels_like = now.get('feelsLike', '未知')
+        text = now.get('text', '未知')
+        wind_dir = now.get('windDir', '未知')
+        wind_speed = now.get('windSpeed', '未知')
+        humidity = now.get('humidity', '未知')
+
+        # 构建响应字符串
+        weather_info = (
+            f"**{city}** 当前天气状况：{text}。\n"
+            f"温度：{temp}°C，体感温度：{feels_like}°C。\n"
+            f"风向：{wind_dir}，风速：{wind_speed} km/h。\n"
+            f"相对湿度：{humidity}%。\n"
+            f"建议：{get_weather_advice(text)}"
+        )
+
+        return weather_info
+
+
+def get_weather_advice(weather_text: str) -> str:
+    """
+    根据天气状况提供简单建议。
+    """
+    advice = {
+        "晴": "天气晴朗，适合外出活动，别忘了防晒哦！",
+        "多云": "天气多云，出行请带上轻薄的外套。",
+        "阴": "天气阴沉，适合在室内安排活动。",
+        "小雨": "有小雨，记得携带雨具。",
+        "中雨": "有中雨，尽量减少户外活动，注意安全。",
+        "大雨": "有大雨，建议待在室内，避免出行。",
+        "雪": "有降雪，注意保暖，出行小心路滑。",
+        # 添加更多天气状况及建议
+    }
+    return advice.get(weather_text, "请根据实际天气情况安排您的活动。")
 
 # 设置页面配置
 st.set_page_config(
@@ -47,8 +139,9 @@ async def run_weather_agent(query: str):
         name="weather_agent",
         system_message=system_message,
         model_client=OpenAIChatCompletionClient(
-            model="gpt-3.5-turbo",
-            api_key=os.environ['OPENAI_API_KEY']
+            # model="gpt-3.5-turbo",
+            model="gpt-4o",
+            api_key=os.environ.get('OPENAI_API_KEY')  # 使用.get以避免KeyError
         ),
         tools=[get_weather],
     )
@@ -109,7 +202,10 @@ with st.form("weather_form"):
     if submitted and user_input:
         # 添加到历史记录
         st.session_state.chat_history.append({"query": user_input, "timestamp": pd.Timestamp.now()})
-        asyncio.run(run_weather_agent(user_input))
+        try:
+            asyncio.run(run_weather_agent(user_input))
+        except Exception as e:
+            st.error(f"发生错误：{e}")
     elif submitted:
         st.warning("请先输入城市名称！")
 
