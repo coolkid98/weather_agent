@@ -92,7 +92,7 @@ def get_weather_advice(weather_text: str) -> str:
     根据天气状况提供简单建议。
     """
     advice = {
-        "晴": "天气晴朗，适合外出活动，别忘了防晒哦！",
+        "晴": "天气晴朗，适合外出活动，���忘了防晒哦！",
         "多云": "天气多云，出行请带上轻薄的外套。",
         "阴": "天气阴沉，适合在室内安排活动。",
         "小雨": "有小雨，记得携带雨具。",
@@ -139,8 +139,8 @@ async def run_weather_agent(query: str):
         name="weather_agent",
         system_message=system_message,
         model_client=OpenAIChatCompletionClient(
-            # model="gpt-3.5-turbo",
-            model="gpt-4o",
+            model="gpt-3.5-turbo",
+            # model="gpt-4o",
             api_key=os.environ.get('OPENAI_API_KEY')  # 使用.get以避免KeyError
         ),
         tools=[get_weather],
@@ -164,9 +164,16 @@ async def run_weather_agent(query: str):
                 # 提取content中的实际文本内容
                 content = message_text.split('content=')[-1].strip("'[]")
                 
-                # 修改：添加去重逻辑
-                if (not content.startswith(('FunctionCall', 'FunctionExecutionResult')) and 
-                    content not in thoughts):  # 添加这个检查
+                # 跳过函数调用和执行结果的消息
+                if content.startswith(('FunctionCall', 'FunctionExecutionResult')):
+                    continue
+                    
+                # 清理content中的type信息
+                if "type='TextMessage'" in content:
+                    content = content.split("type='TextMessage'")[0].strip()
+                
+                # 只有当内容不重复且有实质内容时才添加
+                if content and content not in thoughts:
                     thoughts.append(content)
                     
                     # 更新思考过程
