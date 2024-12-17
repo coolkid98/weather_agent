@@ -77,11 +77,11 @@ async def get_weather(city: str) -> str:
 
         # 构建响应字符串
         weather_info = (
-            f"**{city}** 当前天气状况：{text}。\n"
-            f"温度：{temp}°C，体感温度：{feels_like}°C。\n"
-            f"风向：{wind_dir}，风速：{wind_speed} km/h。\n"
-            f"相对湿度：{humidity}%。\n"
-            f"建议：{get_weather_advice(text)}"
+            f"**{city}** 当前天气状况：{text}。"
+            f"温度：{temp}°C，体感温度：{feels_like}°C。"
+            f"风向：{wind_dir}，风速：{wind_speed} km/h。"
+            f"相对湿度：{humidity}%。"
+            # f"建议：{get_weather_advice(text)}"
         )
 
         return weather_info
@@ -160,13 +160,13 @@ async def run_weather_agent(query: str):
         async for message in agent_team.run_stream(task=f"请查询{query}的天气情况"):
             message_text = str(message)
             
-            # 只显示有意义的文本内容
             if 'content=' in message_text:
                 # 提取content中的实际文本内容
                 content = message_text.split('content=')[-1].strip("'[]")
                 
-                # 过滤掉FunctionCall和FunctionExecutionResult的技术细节
-                if not content.startswith(('FunctionCall', 'FunctionExecutionResult')):
+                # 修改：添加去重逻辑
+                if (not content.startswith(('FunctionCall', 'FunctionExecutionResult')) and 
+                    content not in thoughts):  # 添加这个检查
                     thoughts.append(content)
                     
                     # 更新思考过程
